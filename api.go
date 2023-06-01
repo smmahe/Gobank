@@ -45,6 +45,7 @@ func makeHandlerFunc(f apiFunc)http.HandlerFunc{
 func (sr *Apiserver)Run(){
 	router := mux.NewRouter()
 	router.HandleFunc("/account", makeHandlerFunc(sr.handleAccount))
+	router.HandleFunc("/listaccounts",sr.handleGetAccounts).Methods("GET")
 	http.ListenAndServe(sr.listenaddr, router)
 
 }
@@ -61,9 +62,26 @@ func (sr *Apiserver) handleAccount(w http.ResponseWriter, r *http.Request)error{
 }
 
 func (sr *Apiserver) handleGetAccount(w http.ResponseWriter, r *http.Request)error{
-	return nil
-	
+	return nil	
 }
+
+
+func (sr *Apiserver) handleGetAccounts(w http.ResponseWriter, r *http.Request){
+	accounts, err:=sr.store.GetAccounts()
+	if err != nil{
+		fmt.Println(err)
+
+	}
+		w.WriteHeader(http.StatusBadRequest)
+		w.Header().Add("Content-Type", "application/json")
+		jsoned,err:=json.Marshal(accounts)
+		if err != nil{
+			fmt.Println(err)
+			fmt.Println(string(jsoned))
+		}
+		w.Write(jsoned)
+	}
+
 
 func (sr *Apiserver) handleCreateAccount(w http.ResponseWriter, r *http.Request)error{
 	jstemp := createaccreq{}
@@ -71,7 +89,7 @@ func (sr *Apiserver) handleCreateAccount(w http.ResponseWriter, r *http.Request)
 		return err
 	}
 
-	acc := NewAccount(jstemp.Firstname,jstemp.Lastname,jstemp.Dob)
+	acc := NewAccount(jstemp.Firstname,jstemp.Lastname,jstemp.Email,jstemp.Dob)
 
 	err := sr.store.CreateAccount(acc)
 
