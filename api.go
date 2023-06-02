@@ -4,6 +4,7 @@ import ("fmt"
 		"net/http"
 		"github.com/gorilla/mux"
 		"encoding/json"
+		"strconv"
 		)
 
 type Apiserver struct{
@@ -45,6 +46,8 @@ func makeHandlerFunc(f apiFunc)http.HandlerFunc{
 func (sr *Apiserver)Run(){
 	router := mux.NewRouter()
 	router.HandleFunc("/account", makeHandlerFunc(sr.handleAccount))
+	router.HandleFunc("/account/{id}", makeHandlerFunc(sr.handleGetAccountById))
+	router.HandleFunc("/transfer", makeHandlerFunc(sr.handleTransfer))
 	router.HandleFunc("/listaccounts",sr.handleGetAccounts).Methods("GET")
 	http.ListenAndServe(sr.listenaddr, router)
 
@@ -52,7 +55,7 @@ func (sr *Apiserver)Run(){
 
 func (sr *Apiserver) handleAccount(w http.ResponseWriter, r *http.Request)error{
 	if r.Method == "GET"{
-		return sr.handleGetAccount(w, r)
+		return sr.handleGetAccountById(w, r)
 	}else if r.Method == "POST"{
 		return sr.handleCreateAccount(w,r)
 	}else if r.Method == "DELETE"{
@@ -61,8 +64,25 @@ func (sr *Apiserver) handleAccount(w http.ResponseWriter, r *http.Request)error{
 	return nil
 }
 
-func (sr *Apiserver) handleGetAccount(w http.ResponseWriter, r *http.Request)error{
-	return nil	
+func (sr *Apiserver) handleGetAccountById(w http.ResponseWriter, r *http.Request)error{
+	if r.Method == "GET"{
+		idstr := mux.Vars(r)["id"]
+		id,err := strconv.Atoi(idstr)
+		if err != nil{
+			return fmt.Errorf("Invalid id given %s", idstr)
+		}
+
+		acc,err:= sr.store.GetAccountByID(id)
+		if err != nil{
+			return err
+		}
+
+		return writeJson(w, http.StatusOK, acc)
+	}else if r.Method == "DELETE"{
+		return sr.handleDeleteAccount(w, r)
+	}else{
+		return fmt.Errorf("Method not allowed %s",r.Method)
+	}
 }
 
 
@@ -101,5 +121,52 @@ func (sr *Apiserver) handleCreateAccount(w http.ResponseWriter, r *http.Request)
 }
 
 func (sr *Apiserver) handleDeleteAccount(w http.ResponseWriter, r *http.Request)error{
-	return nil
+	
+	idstr := mux.Vars(r)["id"]
+	id,err := strconv.Atoi(idstr)
+	if err != nil{
+		return fmt.Errorf("Invalid id given %s", id)
+	}
+
+	acc,err := sr.store.GetAccountByID(id)
+	if err != nil{
+		return err
+	}
+	sr.store.DeleteAccount(&acc)
+	return writeJson(w, http.StatusOK, map[string]int{"deleted":id})
 }
+
+func(sr *Apiserver) handleTransfer(w http.ResponseWriter, r *http.Request) error{
+	if r.Method == "POST"{
+		treq := transferreq{}
+		if err:= json.NewDecoder(r.Body).Decode(&treq); err != nil{
+			return err
+		}
+
+		err := sr.store.UpdateAccount(&treq)
+		if err != nil{
+			return err
+		}
+
+		var acc []Account
+
+		// acc1,err := sr.store.GetAccountByID(treq.FromAccId)
+		// acc2,err := sr.store.GetAccountByID(treq.ToAccId)
+
+		// acc = append(acc,acc1)
+		// acc = append(acc,acc2)
+		
+		return writeJson(w, http.StatusOK,acc)
+
+	}else{
+		return fmt.Errorf("Invalid Method %s",r.Method)
+	}
+
+}
+
+
+// func writeTransferJson(w http.ResponseWriter,status int,v any) error{
+// 	w.WriteHeader(status)
+// 	w.Header().Add("Content-Type", "application/json")
+// 	return json.NewEncoder(w).Encode(v)
+// }

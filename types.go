@@ -19,6 +19,13 @@ type createaccreq struct{
 	Dob string
 }
 
+type transferreq struct{
+	FromAccId int `json:"fromaccount"`
+	ToAccId	int 	`json:"toaccount"`
+	Amount int     `json:"amount"`
+}
+
+
 func NewAccount(firstname string,lastname string,email string,dob string) *Account{
 	
 	const lay = "2006-01-02"
