@@ -10,6 +10,12 @@ type Account struct{
 	Balance int     	`json:"balance"`
 	Dob time.Time    	`json:"date"`
 	CreatedAt time.Time  `json:"createdat"`
+	Password string		`json:"-"`
+}
+
+type loginreq struct{
+	Email string	`json:"email"`
+	Password string  `json:"password"`
 }
 
 type createaccreq struct{
@@ -17,6 +23,7 @@ type createaccreq struct{
 	Lastname string
 	Email string
 	Dob string
+	Password string
 }
 
 type transferreq struct{
@@ -26,7 +33,7 @@ type transferreq struct{
 }
 
 
-func NewAccount(firstname string,lastname string,email string,dob string) *Account{
+func NewAccount(firstname string,lastname string,email string,dob string,password string) *Account{
 	
 	const lay = "2006-01-02"
 	const DateTime = "2006-01-02 15:04:05"
@@ -42,5 +49,6 @@ func NewAccount(firstname string,lastname string,email string,dob string) *Accou
 		Balance: 0,
 		Dob: par,
 		CreatedAt :time.Now().UTC(),
+		Password: password,
 	}
 }

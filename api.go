@@ -5,6 +5,9 @@ import ("fmt"
 		"github.com/gorilla/mux"
 		"encoding/json"
 		"strconv"
+		jwt "github.com/golang-jwt/jwt"
+		"os"
+		"golang.org/x/crypto/bcrypt"
 		)
 
 type Apiserver struct{
@@ -45,8 +48,9 @@ func makeHandlerFunc(f apiFunc)http.HandlerFunc{
 
 func (sr *Apiserver)Run(){
 	router := mux.NewRouter()
+	router.HandleFunc("/login", makeHandlerFunc(sr.handleLogin))
 	router.HandleFunc("/account", makeHandlerFunc(sr.handleAccount))
-	router.HandleFunc("/account/{id}", makeHandlerFunc(sr.handleGetAccountById))
+	router.HandleFunc("/account/{id}", withJWTAuth(makeHandlerFunc(sr.handleGetAccountById)))
 	router.HandleFunc("/transfer", makeHandlerFunc(sr.handleTransfer))
 	router.HandleFunc("/listaccounts",sr.handleGetAccounts).Methods("GET")
 	http.ListenAndServe(sr.listenaddr, router)
@@ -55,7 +59,7 @@ func (sr *Apiserver)Run(){
 
 func (sr *Apiserver) handleAccount(w http.ResponseWriter, r *http.Request)error{
 	if r.Method == "GET"{
-		return sr.handleGetAccountById(w, r)
+		return sr.handleGetAccount(w, r)
 	}else if r.Method == "POST"{
 		return sr.handleCreateAccount(w,r)
 	}else if r.Method == "DELETE"{
@@ -63,6 +67,36 @@ func (sr *Apiserver) handleAccount(w http.ResponseWriter, r *http.Request)error{
 	}
 	return nil
 }
+
+func (sr *Apiserver) handleGetAccount(w http.ResponseWriter, r *http.Request)error{
+	if r.Method == "GET"{
+		tokenstring := r.Header.Get("jwt-token")
+		fmt.Println(tokenstring)
+		token,err := validateJWT(tokenstring)
+		if err != nil{
+			return writeJson(w,http.StatusForbidden,ApiError{Error:"Invalid Token "})
+			 
+		}
+		
+		claims, _ := token.Claims.(jwt.MapClaims)
+
+
+		var id int
+		if token.Valid {
+			id,_ = strconv.Atoi(fmt.Sprint(claims["accountnumber"]))
+		}
+        		
+
+		acc,err:= sr.store.GetAccountByID(int(id))
+		
+		if err != nil{
+			return err
+		}
+
+			return writeJson(w, http.StatusOK, acc)
+		}
+		return writeJson(w, http.StatusForbidden, "Error")
+	}
 
 func (sr *Apiserver) handleGetAccountById(w http.ResponseWriter, r *http.Request)error{
 	if r.Method == "GET"{
@@ -92,13 +126,13 @@ func (sr *Apiserver) handleGetAccounts(w http.ResponseWriter, r *http.Request){
 		fmt.Println(err)
 
 	}
-		w.WriteHeader(http.StatusBadRequest)
+		w.WriteHeader(http.StatusOK)
 		w.Header().Add("Content-Type", "application/json")
 		jsoned,err:=json.Marshal(accounts)
 		if err != nil{
 			fmt.Println(err)
 			fmt.Println(string(jsoned))
-		}
+		}	
 		w.Write(jsoned)
 	}
 
@@ -109,7 +143,7 @@ func (sr *Apiserver) handleCreateAccount(w http.ResponseWriter, r *http.Request)
 		return err
 	}
 
-	acc := NewAccount(jstemp.Firstname,jstemp.Lastname,jstemp.Email,jstemp.Dob)
+	acc := NewAccount(jstemp.Firstname,jstemp.Lastname,jstemp.Email,jstemp.Dob,jstemp.Password)
 
 	err := sr.store.CreateAccount(acc)
 
@@ -150,23 +184,90 @@ func(sr *Apiserver) handleTransfer(w http.ResponseWriter, r *http.Request) error
 
 		var acc []Account
 
-		// acc1,err := sr.store.GetAccountByID(treq.FromAccId)
-		// acc2,err := sr.store.GetAccountByID(treq.ToAccId)
-
-		// acc = append(acc,acc1)
-		// acc = append(acc,acc2)
 		
 		return writeJson(w, http.StatusOK,acc)
 
 	}else{
 		return fmt.Errorf("Invalid Method %s",r.Method)
 	}
+}
+
+// JWT Middleware
+
+func withJWTAuth(httphandlerfunc http.HandlerFunc) http.HandlerFunc{
+	return func(w http.ResponseWriter, r *http.Request){
+		tokenstring := r.Header.Get("jwt-token")
+		token,err := validateJWT(tokenstring)
+		if err != nil{
+			writeJson(w,http.StatusForbidden,ApiError{Error:"Invalid Token "})
+			return 
+		}
+		idstr := mux.Vars(r)["id"]
+		id,err := strconv.Atoi(idstr)
+		claims, _ := token.Claims.(jwt.MapClaims)
+
+        
+        if token.Valid && claims["accountnumber"] == float64(id){
+        	httphandlerfunc(w,r)
+    	}else{
+			writeJson(w,http.StatusForbidden,ApiError{Error:"Account number cannot be accessed"})
+			return
+		}
+		
+		
+	}
+}
+
+func validateJWT(tokenstring string)(*jwt.Token,error){
+	secret:=os.Getenv("JWT_SECRET")
+	token, err := jwt.Parse(tokenstring, func(token *jwt.Token) (interface{}, error) {
+	if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+		return nil, fmt.Errorf("Unexpected signing method: %v", token.Header["alg"])
+	}
+		return []byte(secret), nil
+	})
+
+	return token,err
 
 }
 
+func createJWT(acc *Account)(string,error){
+	claims := &jwt.MapClaims{
+		"expiresAt":15000,
+		"accountnumber":acc.Id,
+	}
 
-// func writeTransferJson(w http.ResponseWriter,status int,v any) error{
-// 	w.WriteHeader(status)
-// 	w.Header().Add("Content-Type", "application/json")
-// 	return json.NewEncoder(w).Encode(v)
-// }
+	secret := os.Getenv("JWT_SECRET")
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	return token.SignedString([]byte(secret)) 	
+
+}	
+
+func (sr *Apiserver) handleLogin(w http.ResponseWriter, r *http.Request)error{
+	var req loginreq
+	if r.Method != "POST"{
+		return writeJson(w, http.StatusUnauthorized, "Invalid Request Method")
+	}
+	if err:= json.NewDecoder(r.Body).Decode(&req); err != nil{
+			return err
+	}
+
+	acc,err := sr.store.GetAccountForLogin(req.Email)
+
+	if err != nil{
+		return fmt.Errorf("Invalid Email")
+	}
+
+	err = bcrypt.CompareHashAndPassword([]byte(acc.Password),[]byte(req.Password))
+
+	if err != nil{
+		return fmt.Errorf("Invalid Password")
+	}
+
+	token,err := createJWT(&acc)
+	w.Header().Add("bearer-token",token)
+
+	return writeJson(w, http.StatusOK,"Login Success!!")
+}
+
+

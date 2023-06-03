@@ -6,6 +6,7 @@ import (
 	_ "github.com/lib/pq"
 	"fmt"
 	"log"
+	"golang.org/x/crypto/bcrypt"
 	)
 
 // An interface is created
@@ -16,6 +17,7 @@ type Store interface {
 	DeleteAccount(*Account) error
 	UpdateAccount(*transferreq) error
 	GetAccountByID(int) (Account,error)
+	GetAccountForLogin(string) (Account,error)
 	GetAccounts()([]Account,error)
 }
 
@@ -43,7 +45,7 @@ func NewPostgresStore()(*PostgresStore,error){
 
 func (pg *PostgresStore)INIT()error{
 
-	createstmt := `CREATE TABLE IF NOT EXISTS ACCOUNT (Id serial primary key, Firstname varchar(50), Lastname varchar(50),Email varchar(50) unique,Balance int,Dob Date,created_at timestamp);`
+	createstmt := `CREATE TABLE IF NOT EXISTS ACCOUNT (Id serial primary key, Firstname varchar(50), Lastname varchar(50),Email varchar(50) unique,Balance int,Dob Date,created_at timestamp,password varchar(100));`
 	_,err := pg.db.Exec(createstmt)
 	if err != nil{
 		return fmt.Errorf("Error in creating account table")
@@ -63,8 +65,9 @@ func (pg *PostgresStore)INIT()error{
 
 
 func(pg *PostgresStore)CreateAccount(acc *Account)error{
-	
-	q:=fmt.Sprintf(`INSERT INTO ACCOUNT VALUES(%d,'%s','%s','%s',%d,'%s','%s');`, acc.Id,acc.Firstname,acc.Lastname,acc.Email,acc.Balance,acc.Dob.Format("2006-01-02"),acc.CreatedAt.Format("2006-01-02 15:04:05"))
+	hashpwd,_ := bcrypt.GenerateFromPassword([]byte(acc.Password),10)
+	acc.Password = string(hashpwd)
+	q:=fmt.Sprintf(`INSERT INTO ACCOUNT VALUES(%d,'%s','%s','%s',%d,'%s','%s','%s');`, acc.Id,acc.Firstname,acc.Lastname,acc.Email,acc.Balance,acc.Dob.Format("2006-01-02"),acc.CreatedAt.Format("2006-01-02 15:04:05"),acc.Password)
 	fmt.Println("QUERY ",q)
 	_,err := pg.db.Exec(q)
 	if err != nil{
@@ -87,7 +90,7 @@ func(pg *PostgresStore)UpdateAccount(treq *transferreq)error{
 	var ctx context.Context
 	ctx = context.Background()
 
-	tx,err := pg.db.BeginTx(ctx)
+	tx,err := pg.db.BeginTx(ctx,nil)
 	if err != nil{
 		fmt.Println(err)
 	}
@@ -189,6 +192,29 @@ func(pg *PostgresStore)GetAccountByID(id int)(Account,error) {
 	return acc,nil
 
 }
+
+
+func(pg *PostgresStore)GetAccountForLogin(email string)(Account,error) {
+
+	row := pg.db.QueryRow("Select id,email,password from account where email = $1",email)
+	var acc Account
+	err:= row.Scan(&acc.Id,&acc.Email,&acc.Password)
+
+	switch err {
+		case sql.ErrNoRows:
+  			return acc,fmt.Errorf("No rows")
+
+  		case nil:
+  			return acc,nil
+
+  		default:
+  			fmt.Println(err)
+	}
+
+	return acc,nil
+
+}
+
 
 func(pg *PostgresStore)GetAccounts()(acc []Account,err error) {
 	rows,err := pg.db.Query("Select id,firstname,lastname,email,dob,balance,created_at from account")
